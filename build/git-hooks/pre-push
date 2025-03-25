@@ -1,0 +1,119 @@
+#!/usr/bin/env node
+const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+// Configuration
+const LOG_DIR = path.join(__dirname, '../../build/logs');
+const DEBUG_LOG = path.join(LOG_DIR, 'tag_debug.log');
+const HISTORY_LOG = path.join(LOG_DIR, 'tag_history.log');
+const ERROR_LOG = path.join(LOG_DIR, 'tag_error.log');
+const ENV_FILE = path.join(__dirname, '../../build/.env');
+
+// Initialize logs
+function initLogs() {
+  if (!fs.existsSync(LOG_DIR)) {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+  }
+  fs.writeFileSync(DEBUG_LOG, '');
+  if (!fs.existsSync(HISTORY_LOG)) fs.writeFileSync(HISTORY_LOG, '');
+  if (!fs.existsSync(ERROR_LOG)) fs.writeFileSync(ERROR_LOG, '');
+}
+
+function debugLog(message) {
+  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  fs.appendFileSync(DEBUG_LOG, `[DEBUG ${timestamp}] ${message}\n`);
+}
+
+function historyLog(message) {
+  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  fs.appendFileSync(HISTORY_LOG, `${timestamp} - ${message}\n`);
+}
+
+function errorLog(message) {
+  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  fs.appendFileSync(ERROR_LOG, `[ERROR ${timestamp}] ${message}\n`);
+}
+
+function getTagVersion() {
+  try {
+    debugLog('Reading TAG_VERSION from .env');
+    const envContent = fs.readFileSync(ENV_FILE, 'utf8');
+    const match = envContent.match(/TAG_VERSION=([^\n]+)/);
+    if (!match) throw new Error('TAG_VERSION not found in .env');
+    debugLog(`Found TAG_VERSION: ${match[1]}`);
+    return match[1];
+  } catch (error) {
+    errorLog(`getTagVersion error: ${error.message}`);
+    throw error;
+  }
+}
+
+function tagExists(tagName) {
+  try {
+    execSync(`git rev-parse ${tagName}`, { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createAndPushTag() {
+  const baseTagVersion = getTagVersion();
+  let tagName = `v${baseTagVersion}`;
+  let counter = 0;
+  const maxAttempts = 100;
+
+  while (counter < maxAttempts) {
+    const currentTag = counter === 0 ? tagName : `${tagName}-${counter}`;
+    debugLog(`Attempting tag: ${currentTag}`);
+
+    if (tagExists(currentTag)) {
+      debugLog(`Tag ${currentTag} exists, trying next...`);
+      counter++;
+      continue;
+    }
+
+    try {
+      debugLog(`Creating tag: ${currentTag}`);
+      execSync(`git tag -a ${currentTag} -m "${currentTag}"`, { stdio: 'inherit' });
+      
+      debugLog(`Pushing tag: ${currentTag}`);
+      execSync(`git push origin ${currentTag}`, { stdio: 'inherit' });
+      
+      historyLog(`Created and pushed tag: ${currentTag}`);
+      console.log(`✅ Successfully deployed tag: ${currentTag}`);
+      return;
+    } catch (error) {
+      errorLog(`Tag ${currentTag} failed: ${error.message}`);
+      counter++;
+    }
+  }
+
+  throw new Error(`Failed to create tag after ${maxAttempts} attempts`);
+}
+
+// Main execution
+initLogs();
+debugLog('Starting pre-push hook');
+
+try {
+  // Check for -d or --deploy flag
+  const args = process.argv.slice(2);
+  const deployFlag = args.some(arg => ['-d', '--deploy'].includes(arg));
+
+  if (deployFlag) {
+    debugLog('Deployment flag detected, running tag deployment');
+    createAndPushTag();
+  } else {
+    debugLog('No deployment flag, skipping tag creation');
+  }
+} catch (error) {
+  errorLog(`Fatal error: ${error.message}`);
+  console.error(`❌ Error: ${error.message}`);
+  process.exit(1);
+} finally {
+  debugLog('Pre-push hook completed');
+}
+
+process.exit(0);
