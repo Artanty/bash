@@ -59,31 +59,49 @@ function tagExists(tagName) {
 }
 
 function createAndPushTag() {
-  const baseTagVersion = getTagVersion();
-  const tagName = `v${baseTagVersion}`;
+    try {
+      debugLog('Starting tag creation process');
+      
+      // 1. Get version from .env
+      const version = getTagVersion();
+      const tagName = `v${version}`;
+      debugLog(`Tag to be created: ${tagName}`);
   
-  debugLog(`Attempting to create tag: ${tagName}`);
-
-  if (tagExists(tagName)) {
-    const errorMsg = `Tag ${tagName} already exists - aborting`;
-    errorLog(errorMsg);
-    throw new Error(errorMsg);
+      // 2. Verify tag doesn't exist
+      debugLog(`Checking if tag exists: ${tagName}`);
+      if (execSync(`git tag -l "${tagName}"`, { encoding: 'utf8' }).trim() === tagName) {
+        throw new Error(`Tag ${tagName} already exists`);
+      }
+      debugLog(`Tag ${tagName} does not exist - proceeding`);
+  
+      // 3. Create annotated tag
+      debugLog(`Creating annotated tag with message: "${tagName}"`);
+      execSync(`git tag -a ${tagName} -m "${tagName}"`, { stdio: 'inherit' });
+      debugLog(`Successfully created tag locally: ${tagName}`);
+  
+      // 4. Push tag to remote
+      debugLog(`Pushing tag to remote: ${tagName}`);
+      const pushOutput = execSync(`git push origin ${tagName}`, { encoding: 'utf8' });
+      debugLog(`Git push output: ${pushOutput.trim()}`);
+  
+      // 5. Verify remote tag
+      debugLog(`Verifying remote tag exists: ${tagName}`);
+      const remoteTags = execSync('git ls-remote --tags origin', { encoding: 'utf8' });
+      if (!remoteTags.includes(`refs/tags/${tagName}`)) {
+        throw new Error(`Failed to verify tag on remote: ${tagName}`);
+      }
+  
+      historyLog(`Created and pushed tag: ${tagName}`);
+      console.log(`✅ Successfully deployed tag: ${tagName}`);
+      debugLog('Tag creation process completed successfully');
+  
+    } catch (error) {
+      debugLog(`Tag creation failed at step: ${error.message}`);
+      errorLog(`Tag creation failed: ${error.message}`);
+      console.error(`❌ Error creating tag: ${error.message}`);
+      throw error; // Re-throw to maintain error chain
+    }
   }
-
-  try {
-    debugLog(`Creating tag: ${tagName}`);
-    execSync(`git tag -a ${tagName} -m "${tagName}"`, { stdio: 'inherit' });
-    
-    debugLog(`Pushing tag: ${tagName}`);
-    execSync(`git push origin ${tagName}`, { stdio: 'inherit' });
-    
-    historyLog(`Created and pushed tag: ${tagName}`);
-    console.log(`✅ Successfully deployed tag: ${tagName}`);
-  } catch (error) {
-    errorLog(`Tag creation failed: ${error.message}`);
-    throw error;
-  }
-}
 
 // Main execution
 initLogs();
