@@ -4,8 +4,8 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 // Configuration
-const LOG_FILE = path.join(__dirname, '../logs/commit_history.log');
-const DEBUG_LOG_FILE = path.join(__dirname, '../logs/commit_debug.log');
+const HISTORY_LOG = path.join(__dirname, '../logs/commit_history.log');
+const DEBUG_LOG = path.join(__dirname, '../logs/commit_debug.log');
 const ENV_FILE = path.join(__dirname, '../../build/.env');
 
 const FOLDERS = {
@@ -19,23 +19,41 @@ const FOLDERS = {
   }
 };
 
+function manageLog(logFilePath, maxEntries = 500) {
+    try {
+      if (fs.existsSync(logFilePath)) {
+        const lines = fs.readFileSync(logFilePath, 'utf8').split('\n').filter(line => line.trim());
+        if (lines.length > maxEntries) {
+          fs.writeFileSync(logFilePath, '');
+          debugLog(`Cleared history log (${lines.length} entries exceeded ${maxEntries} limit)`);
+          return true; // Indicate that log was cleared
+        }
+      }
+      return false; // Indicate that log was not cleared
+    } catch (error) {
+      errorLog(`History log clearance failed for ${logFilePath}: ${error.message}`);
+      throw error; // Re-throw the error if you want calling code to handle it
+    }
+  }
+
 // Initialize logs
 function initLogs() {
-  if (!fs.existsSync(path.dirname(LOG_FILE))) {
-    fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+  manageLog(HISTORY_LOG);
+  if (!fs.existsSync(path.dirname(HISTORY_LOG))) {
+    fs.mkdirSync(path.dirname(HISTORY_LOG), { recursive: true });
   }
   // Clear debug log completely before each run
-  fs.writeFileSync(DEBUG_LOG_FILE, '');
+  fs.writeFileSync(DEBUG_LOG, '');
 }
 
 function debugLog(message) {
   const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  fs.appendFileSync(DEBUG_LOG_FILE, `[DEBUG ${timestamp}] ${message}\n`);
+  fs.appendFileSync(DEBUG_LOG, `[DEBUG ${timestamp}] ${message}\n`);
 }
 
 function log(message) {
   const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
-  fs.appendFileSync(LOG_FILE, `${timestamp} - ${message}\n`);
+  fs.appendFileSync(HISTORY_LOG, `${timestamp} - ${message}\n`);
 }
 
 function getStagedVersion(folderConfig) {
