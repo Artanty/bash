@@ -98,13 +98,14 @@ initLogs();
 debugLog('Starting pre-push hook');
 
 try {
-  // Get the current branch name
-  const branch = execSync('git symbolic-ref --short HEAD', { encoding: 'utf8' }).trim();
-  debugLog(`Current branch: ${branch}`);
+  // Get the parent process command (how git was invoked)
+  const parentPid = process.ppid;
+  const cmd = execSync(`ps -o command= -p ${parentPid}`, { encoding: 'utf8' }).trim();
+  debugLog(`Parent process command: ${cmd}`);
 
-  // Check for -d flag using environment variable (set by wrapper script)
-  const hasDeployFlag = process.env.GIT_PUSH_DEPLOY === 'true';
-
+  // Check for -d flag in the git push command
+  const hasDeployFlag = cmd.includes(' -d') || cmd.includes(' --deploy');
+  
   if (hasDeployFlag) {
     debugLog('Deployment flag detected, running tag deployment');
     createAndPushTag();
