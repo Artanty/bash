@@ -1,0 +1,340 @@
+#!/usr/bin/env node
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+
+// Configuration
+const LOG_FILE = path.join(__dirname, '../logs/request.log');
+const DEBUG_LOG_FILE = path.join(__dirname, '../logs/debug.log');
+const ENV_FILE = path.join(__dirname, '../../build/.env');
+
+const FOLDERS = {
+  web: {
+    path: path.join(__dirname, '../../web/package.json'),
+    folder: 'web/'
+  },
+  back: {
+    path: path.join(__dirname, '../../back/package.json'),
+    folder: 'back/'
+  }
+};
+
+// Initialize logs
+function initLogs() {
+  if (!fs.existsSync(path.dirname(LOG_FILE))) {
+    fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+  }
+  // Clear debug log completely before each run
+  fs.writeFileSync(DEBUG_LOG_FILE, '');
+}
+
+function debugLog(message) {
+  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  fs.appendFileSync(DEBUG_LOG_FILE, `[DEBUG ${timestamp}] ${message}\n`);
+}
+
+function log(message) {
+  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  fs.appendFileSync(LOG_FILE, `${timestamp} - ${message}\n`);
+}
+
+function getStagedVersion(folderConfig) {
+  try {
+    debugLog(`Getting staged version for ${folderConfig.folder}`);
+    const content = execSync(`git show :${folderConfig.folder}package.json`, {
+      stdio: 'pipe',
+      encoding: 'utf-8'
+    });
+    const version = JSON.parse(content).version;
+    debugLog(`Staged version for ${folderConfig.folder}: ${version}`);
+    return version;
+  } catch (error) {
+    debugLog(`Error getting staged version for ${folderConfig.folder}: ${error.message}`);
+    return null;
+  }
+}
+
+function getHeadVersion(folderConfig) {
+  try {
+    debugLog(`Checking HEAD version for ${folderConfig.folder}`);
+    
+    // First check if HEAD exists
+    try {
+      execSync('git rev-parse HEAD', { stdio: 'pipe' });
+    } catch {
+      debugLog('No HEAD commit exists');
+      return '0.0.0';
+    }
+
+    // Check if package.json exists in HEAD
+    try {
+      const exists = execSync(
+        `git ls-tree --name-only HEAD ${folderConfig.folder}package.json`,
+        { stdio: 'pipe', encoding: 'utf-8' }
+      ).trim();
+      if (!exists) {
+        debugLog(`package.json does not exist in HEAD for ${folderConfig.folder}`);
+        return '0.0.0';
+      }
+    } catch {
+      debugLog(`Error checking if package.json exists in HEAD for ${folderConfig.folder}`);
+      return '0.0.0';
+    }
+
+    // Get the content
+    const content = execSync(
+      `git show HEAD:${folderConfig.folder}package.json`,
+      { stdio: 'pipe', encoding: 'utf-8' }
+    ).trim();
+
+    if (!content) {
+      debugLog(`Empty package.json content in HEAD for ${folderConfig.folder}`);
+      return '0.0.0';
+    }
+
+    // Parse JSON safely
+    let pkg;
+    try {
+      pkg = JSON.parse(content);
+    } catch (error) {
+      debugLog(`Failed to parse package.json for ${folderConfig.folder}: ${error.message}`);
+      return '0.0.0';
+    }
+
+    if (!pkg.version) {
+      debugLog(`No version field in HEAD package.json for ${folderConfig.folder}`);
+      return '0.0.0';
+    }
+
+    debugLog(`HEAD version for ${folderConfig.folder}: ${pkg.version}`);
+    return pkg.version;
+  } catch (error) {
+    debugLog(`Unexpected error in getHeadVersion for ${folderConfig.folder}: ${error.message}`);
+    return '0.0.0';
+  }
+}
+
+function hasFolderChanges(folderConfig) {
+  try {
+    debugLog(`Checking for changes in ${folderConfig.folder}`);
+    const changes = execSync(
+      `git diff --cached --name-only -- ${folderConfig.folder}`,
+      { stdio: 'pipe', encoding: 'utf-8' }
+    ).trim();
+    
+    debugLog(`Raw changes for ${folderConfig.folder}: ${changes}`);
+    
+    if (!changes) {
+      debugLog(`No changes detected in ${folderConfig.folder}`);
+      return false;
+    }
+    
+    const changedFiles = changes.split('\n').filter(Boolean);
+    const nonPackageChanges = changedFiles.filter(file => !file.endsWith('package.json'));
+    
+    debugLog(`Non-package.json changes for ${folderConfig.folder}: ${nonPackageChanges.join(', ')}`);
+    return nonPackageChanges.length > 0;
+  } catch (error) {
+    debugLog(`Error checking changes for ${folderConfig.folder}: ${error.message}`);
+    return false;
+  }
+}
+
+function bumpPatchVersion(folderConfig) {
+  try {
+    debugLog(`Starting patch version bump for ${folderConfig.folder}`);
+    
+    // Read current package.json
+    const currentContent = fs.readFileSync(folderConfig.path, 'utf8');
+    const pkg = JSON.parse(currentContent);
+    const [major, minor, patch] = pkg.version.split('.').map(Number);
+    
+    // Increment patch version
+    const newVersion = `${major}.${minor}.${patch + 1}`;
+    pkg.version = newVersion;
+    
+    // Write back with original formatting
+    fs.writeFileSync(folderConfig.path, JSON.stringify(pkg, null, 2) + '\n');
+    debugLog(`Updated version for ${folderConfig.folder} to ${newVersion}`);
+    
+    // Stage the change
+    execSync(`git add ${folderConfig.path}`, { stdio: 'inherit' });
+    debugLog(`Staged package.json changes for ${folderConfig.folder}`);
+    
+    return newVersion;
+  } catch (error) {
+    debugLog(`Error bumping version for ${folderConfig.folder}: ${error.message}`);
+    return null;
+  }
+}
+
+function handleMinorVersionBump(folderConfig, stagedVersion, headVersion) {
+  try {
+    debugLog(`Checking for minor version bump in ${folderConfig.folder}`);
+    
+    const [headMajor, headMinor] = headVersion.split('.').map(Number);
+    const [stagedMajor, stagedMinor] = stagedVersion.split('.').map(Number);
+    
+    // Check if minor version was manually increased
+    if (stagedMajor === headMajor && stagedMinor > headMinor) {
+      debugLog(`Minor version manually increased in ${folderConfig.folder} - resetting patch to 0`);
+      
+      // Read current package.json
+      const currentContent = fs.readFileSync(folderConfig.path, 'utf8');
+      const pkg = JSON.parse(currentContent);
+      
+      // Reset patch to 0
+      const newVersion = `${stagedMajor}.${stagedMinor}.0`;
+      pkg.version = newVersion;
+      
+      // Write back with original formatting
+      fs.writeFileSync(folderConfig.path, JSON.stringify(pkg, null, 2) + '\n');
+      debugLog(`Reset patch to 0 for ${folderConfig.folder}: ${newVersion}`);
+      
+      // Stage the change
+      execSync(`git add ${folderConfig.path}`, { stdio: 'inherit' });
+      debugLog(`Staged package.json changes for ${folderConfig.folder}`);
+      
+      return newVersion;
+    }
+    
+    return null;
+  } catch (error) {
+    debugLog(`Error in handleMinorVersionBump for ${folderConfig.folder}: ${error.message}`);
+    return null;
+  }
+}
+
+function updateEnvTagVersion() {
+  try {
+    debugLog('Updating TAG_VERSION in build/.env');
+    
+    // Get current versions from both folders
+    const backVersion = getCurrentVersion(FOLDERS.back);
+    const webVersion = getCurrentVersion(FOLDERS.web);
+    
+    debugLog(`Back version: ${backVersion}, Web version: ${webVersion}`);
+    
+    // Parse version components
+    const [backMajor, backMinor, backPatch] = backVersion.split('.').map(Number);
+    const [webMajor, webMinor, webPatch] = webVersion.split('.').map(Number);
+    
+    // Create new tag version (backMinor.backPatch.webMinor.webPatch)
+    const newTagVersion = `${backMinor}.${backPatch}.${webMinor}.${webPatch}`;
+    
+    // Read existing .env file if it exists
+    let envContent = fs.existsSync(ENV_FILE) 
+      ? fs.readFileSync(ENV_FILE, 'utf8') 
+      : '';
+    
+    // Update or add TAG_VERSION line
+    if (envContent.includes('TAG_VERSION=')) {
+      envContent = envContent.replace(
+        /TAG_VERSION=.*/,
+        `TAG_VERSION=${newTagVersion}`
+      );
+    } else {
+      envContent += `TAG_VERSION=${newTagVersion}\n`;
+    }
+    
+    // Write back to file (not staged for commit)
+    fs.writeFileSync(ENV_FILE, envContent.trim());
+    
+    log(`Updated TAG_VERSION to ${newTagVersion} (not committed)`);
+    debugLog(`New TAG_VERSION: ${newTagVersion}`);
+    
+    return newTagVersion;
+  } catch (error) {
+    debugLog(`Error updating TAG_VERSION: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * Gets the current version from a package.json file in the working directory
+ * @param {Object} folderConfig - The folder configuration object
+ * @param {string} folderConfig.path - Path to the package.json file
+ * @returns {string} The version string (e.g., "1.0.0") or "0.0.0" if not found
+ */
+function getCurrentVersion(folderConfig) {
+  try {
+    debugLog(`Reading current version from ${folderConfig.path}`);
+    
+    // Read and parse package.json
+    const content = fs.readFileSync(folderConfig.path, 'utf8');
+    const pkg = JSON.parse(content);
+    
+    // Validate version exists
+    if (!pkg.version) {
+      debugLog(`No version field found in ${folderConfig.path}`);
+      return '0.0.0';
+    }
+    
+    // Validate version format (X.Y.Z)
+    if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
+      debugLog(`Invalid version format in ${folderConfig.path}: ${pkg.version}`);
+      return '0.0.0';
+    }
+    
+    debugLog(`Current version for ${folderConfig.folder}: ${pkg.version}`);
+    return pkg.version;
+  } catch (error) {
+    debugLog(`Error reading ${folderConfig.path}: ${error.message}`);
+    return '0.0.0';
+  }
+}
+
+// Main execution
+initLogs();
+debugLog('Starting pre-commit hook execution');
+
+try {
+  // Process both folders
+  for (const [folderName, folderConfig] of Object.entries(FOLDERS)) {
+    debugLog(`Processing ${folderName} folder`);
+    
+    const stagedVersion = getStagedVersion(folderConfig);
+    const headVersion = getHeadVersion(folderConfig);
+    const folderChangesExist = hasFolderChanges(folderConfig);
+    
+    debugLog(`
+      ${folderName} State:
+      - Staged Version: ${stagedVersion}
+      - HEAD Version: ${headVersion}
+      - Changes Exist: ${folderChangesExist}
+    `);
+
+    // First handle manual minor version bumps
+    if (stagedVersion && headVersion) {
+      const minorBumpVersion = handleMinorVersionBump(folderConfig, stagedVersion, headVersion);
+      if (minorBumpVersion) {
+        log(`${folderName} version: Reset patch to 0 after minor version bump: ${minorBumpVersion}`);
+        continue;
+      }
+    }
+
+    // Then check for other version changes
+    if (stagedVersion && headVersion && stagedVersion !== headVersion) {
+      log(`${folderName} version manually changed to ${stagedVersion}`);
+      continue;
+    } 
+    
+    // Finally handle folder changes with auto-bump
+    if (folderChangesExist) {
+      const newVersion = bumpPatchVersion(folderConfig);
+      if (newVersion) {
+        log(`${folderName} version auto-bumped to ${newVersion} (${folderName} files changed)`);
+      }
+    } else {
+      log(`No ${folderName} version change needed (no ${folderName} changes detected)`);
+    }
+  }
+  updateEnvTagVersion();
+} catch (error) {
+  debugLog(`Fatal error: ${error.message}`);
+  console.error('Error in pre-commit hook:', error);
+} finally {
+  debugLog('Hook execution completed');
+}
+
+process.exit(0);
