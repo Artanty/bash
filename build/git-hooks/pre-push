@@ -98,13 +98,12 @@ initLogs();
 debugLog('Starting pre-push hook');
 
 try {
-  // Get the parent process command (how git was invoked)
-  const parentPid = process.ppid;
-  const cmd = execSync(`ps -o command= -p ${parentPid}`, { encoding: 'utf8' }).trim();
-  debugLog(`Parent process command: ${cmd}`);
+  // Get the push arguments from environment variables
+  const gitArgs = process.env.GIT_PUSH_ARGS || '';
+  debugLog(`Git push arguments: ${gitArgs}`);
 
-  // Check for -d flag in the git push command
-  const hasDeployFlag = cmd.includes(' -d') || cmd.includes(' --deploy');
+  // Check for -d flag in push arguments
+  const hasDeployFlag = gitArgs.includes(' -d') || gitArgs.includes(' --deploy');
   
   if (hasDeployFlag) {
     debugLog('Deployment flag detected, running tag deployment');
@@ -117,4 +116,7 @@ try {
   console.error(`❌ Error: ${error.message}`);
   process.exit(1);
 } finally {
-  debugLog
+  debugLog('Pre-push hook completed');
+}
+
+process.exit(0);
