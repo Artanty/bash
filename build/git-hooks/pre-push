@@ -117,7 +117,4 @@ try {
   console.error(`❌ Error: ${error.message}`);
   process.exit(1);
 } finally {
-  debugLog('Pre-push hook completed');
-}
-
-process.exit(0);
+  debugLog
