@@ -60,37 +60,29 @@ function tagExists(tagName) {
 
 function createAndPushTag() {
   const baseTagVersion = getTagVersion();
-  let tagName = `v${baseTagVersion}`;
-  let counter = 0;
-  const maxAttempts = 100;
+  const tagName = `v${baseTagVersion}`;
+  
+  debugLog(`Attempting to create tag: ${tagName}`);
 
-  while (counter < maxAttempts) {
-    const currentTag = counter === 0 ? tagName : `${tagName}-${counter}`;
-    debugLog(`Attempting tag: ${currentTag}`);
-
-    if (tagExists(currentTag)) {
-      debugLog(`Tag ${currentTag} exists, trying next...`);
-      counter++;
-      continue;
-    }
-
-    try {
-      debugLog(`Creating tag: ${currentTag}`);
-      execSync(`git tag -a ${currentTag} -m "${currentTag}"`, { stdio: 'inherit' });
-      
-      debugLog(`Pushing tag: ${currentTag}`);
-      execSync(`git push origin ${currentTag}`, { stdio: 'inherit' });
-      
-      historyLog(`Created and pushed tag: ${currentTag}`);
-      console.log(`✅ Successfully deployed tag: ${currentTag}`);
-      return;
-    } catch (error) {
-      errorLog(`Tag ${currentTag} failed: ${error.message}`);
-      counter++;
-    }
+  if (tagExists(tagName)) {
+    const errorMsg = `Tag ${tagName} already exists - aborting`;
+    errorLog(errorMsg);
+    throw new Error(errorMsg);
   }
 
-  throw new Error(`Failed to create tag after ${maxAttempts} attempts`);
+  try {
+    debugLog(`Creating tag: ${tagName}`);
+    execSync(`git tag -a ${tagName} -m "${tagName}"`, { stdio: 'inherit' });
+    
+    debugLog(`Pushing tag: ${tagName}`);
+    execSync(`git push origin ${tagName}`, { stdio: 'inherit' });
+    
+    historyLog(`Created and pushed tag: ${tagName}`);
+    console.log(`✅ Successfully deployed tag: ${tagName}`);
+  } catch (error) {
+    errorLog(`Tag creation failed: ${error.message}`);
+    throw error;
+  }
 }
 
 // Main execution
