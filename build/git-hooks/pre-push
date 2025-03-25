@@ -98,15 +98,18 @@ initLogs();
 debugLog('Starting pre-push hook');
 
 try {
-  // Check for -d or --deploy flag
-  const args = process.argv.slice(2);
-  const deployFlag = args.some(arg => ['-d', '--deploy'].includes(arg));
+  // Get the push arguments from environment variables
+  const gitArgs = process.env.GIT_PUSH_ARGS || '';
+  debugLog(`Git push arguments: ${gitArgs}`);
 
-  if (deployFlag) {
+  // Check for -d flag in push arguments
+  const hasDeployFlag = gitArgs.includes(' -d') || gitArgs.includes(' --deploy');
+  
+  if (hasDeployFlag) {
     debugLog('Deployment flag detected, running tag deployment');
     createAndPushTag();
   } else {
-    debugLog('No deployment flag, skipping tag creation');
+    debugLog('No deployment flag found, skipping tag creation');
   }
 } catch (error) {
   errorLog(`Fatal error: ${error.message}`);
