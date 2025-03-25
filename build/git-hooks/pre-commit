@@ -4,8 +4,8 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 // Configuration
-const LOG_FILE = path.join(__dirname, '../logs/request.log');
-const DEBUG_LOG_FILE = path.join(__dirname, '../logs/debug.log');
+const LOG_FILE = path.join(__dirname, '../logs/commit_history.log');
+const DEBUG_LOG_FILE = path.join(__dirname, '../logs/commit_debug.log');
 const ENV_FILE = path.join(__dirname, '../../build/.env');
 
 const FOLDERS = {
