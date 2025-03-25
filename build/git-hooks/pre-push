@@ -102,14 +102,12 @@ try {
   const branch = execSync('git symbolic-ref --short HEAD', { encoding: 'utf8' }).trim();
   debugLog(`Current branch: ${branch}`);
 
-  // Check if we need to deploy (using a marker file)
-  const deployFlagPath = path.join(__dirname, 'deploy.flag');
-  const shouldDeploy = fs.existsSync(deployFlagPath);
+  // Check for -d flag using environment variable (set by wrapper script)
+  const hasDeployFlag = process.env.GIT_PUSH_DEPLOY === 'true';
 
-  if (shouldDeploy) {
+  if (hasDeployFlag) {
     debugLog('Deployment flag detected, running tag deployment');
     createAndPushTag();
-    fs.unlinkSync(deployFlagPath); // Remove flag after deployment
   } else {
     debugLog('No deployment flag found, skipping tag creation');
   }
