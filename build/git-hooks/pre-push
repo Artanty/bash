@@ -98,18 +98,18 @@ initLogs();
 debugLog('Starting pre-push hook');
 
 try {
-  // Get the raw push arguments from the command line
-  const rawArgs = process.argv.slice(2).join(' ');
-  debugLog(`Raw command line arguments: ${rawArgs}`);
+  // Get the most recent commit message
+  const commitMsg = execSync('git log -1 --pretty=%B', { encoding: 'utf8' }).trim();
+  debugLog(`Last commit message: "${commitMsg}"`);
 
-  // Check for -d or --deploy flag in arguments
-  const hasDeployFlag = rawArgs.includes('-d') || rawArgs.includes('--deploy');
+  // Check for deployment flag in commit message
+  const hasDeployFlag = commitMsg.includes('git pre-push -d');
   
   if (hasDeployFlag) {
-    debugLog('Deployment flag detected, running tag deployment');
+    debugLog('Deployment flag detected in commit message, running tag deployment');
     createAndPushTag();
   } else {
-    debugLog('No deployment flag found, skipping tag creation');
+    debugLog('No deployment flag found in commit message, skipping tag creation');
   }
 } catch (error) {
   errorLog(`Fatal error: ${error.message}`);
